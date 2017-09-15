@@ -1,0 +1,51 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure(2) do |config|
+
+	config.hostmanager.enabled = true
+	config.hostmanager.manage_guest = true
+	config.hostmanager.manage_host = false
+	config.hostmanager.include_offline = false
+	config.hostmanager.ignore_private_ip = true
+
+	config.vm.define "puppetmaster" do |puppet|
+		# Puppetmaster on CentOS 7
+		config.vm.provider "virtualbox" do |v|
+		  v.memory = 2048
+		end
+		puppet.vm.synced_folder ".", "/vagrant"
+		puppet.vm.synced_folder "../code", "/puppet_code"
+		puppet.vm.synced_folder "../puppetserver", "/puppet_puppetserver"
+		puppet.vm.box = "boxcutter/centos72"
+		puppet.vm.hostname = "puppetmaster.talentsoft.com"
+		#puppet.vm.network :private_network, ip: "10.0.20.10"
+		puppet.vm.network "public_network", use_dhcp_assigned_default_route: true
+		puppet.vm.network "forwarded_port", guest: 8140, host: 8140
+		puppet.vm.provision "shell", inline: <<-SHELL
+		  sudo yum update -y
+		  sudo rpm -ivh https://yum.puppetlabs.com/puppetlabs-release-pc1-el-7.noarch.rpm
+		  sudo yum install puppetserver -y
+		  sudo rm -rf /etc/puppetlabs/code
+		  sudo ln -s /puppet_code /etc/puppetlabs/code
+		  sudo rm -rf /etc/puppetlabs/puppetserver
+		  sudo ln -s /puppet_puppetserver /etc/puppetlabs/puppetserver
+		  sudo sed -i 's/2g/512m/g' /etc/sysconfig/puppetserver
+		  echo "*" | sudo tee /etc/puppetlabs/puppet/autosign.conf
+			sudo /opt/puppetlabs/bin/puppetserver gem install hiera-eyaml
+      sudo cp -r /vagrant/keys /etc/puppetlabs
+      sudo chown puppet:puppet /etc/puppetlabs/keys/private_key.pkcs7.pem
+      sudo chown puppet:puppet /etc/puppetlabs/keys/public_key.pkcs7.pem
+		  sudo service puppetserver start
+		SHELL
+		puppet.hostmanager.ip_resolver = proc do |machine|
+	    result = ""
+	    machine.communicate.execute("ifconfig eth1") do |type, data|
+	      result << data if type == :stdout
+	    end
+	    (ip = /^\s*inet .*?(\d+\.\d+\.\d+\.\d+)\s+/.match(result)) && ip[1]
+	  end
+		puppet.hostmanager.aliases = %w(puppetmaster)
+	end
+
+end
